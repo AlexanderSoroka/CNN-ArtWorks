@@ -53,33 +53,33 @@ def create_dataset_iterator(files):
         .make_one_shot_iterator()
 
 
-def build_model():
-    return tf.keras.models.Sequential ([
-        tf.keras.layers.Conv2D(filters=128, kernel_size=3),
-        tf.keras.layers.MaxPool2D(),
-        tf.keras.layers.BatchNormalization(),
-        tf.keras.layers.Flatten(),
-        tf.keras.layers.Dense(NUM_CLASSES, activation=tf.keras.activations.softmax)
-    ])
+def build_model(images):
+    input = tf.keras.layers.Input(tensor=images)
+    layer = tf.keras.layers.Conv2D(filters=128, kernel_size=3)(input)
+    layer = tf.keras.layers.Conv2D(filters=128, kernel_size=3)(layer)
+    layer = tf.keras.layers.MaxPool2D()(layer)
+    layer = tf.keras.layers.Flatten()(layer)
+    output = tf.keras.layers.Dense(50, activation=tf.keras.activations.relu)(layer)
+    model = tf.keras.models.Model(inputs=input, outputs=output)
+    return model
 
 
 def main():
     train_images, train_labels = create_dataset_iterator(glob.glob('data/train-*')).get_next()
     train_labels = tf.one_hot(train_labels, NUM_CLASSES)
-    model = build_model()
+    model = build_model(train_images)
 
     model.compile(
-        optimizer=keras.optimizers.sgd(lr=0.001),
+        optimizer=keras.optimizers.RMSprop(lr=0.001),
         loss=tf.keras.losses.categorical_crossentropy,
         metrics=[tf.keras.metrics.categorical_accuracy],
         target_tensors=[train_labels]
     )
 
     model.fit(
-        train_images, train_labels,
-        epochs=30, steps_per_epoch=int(TRAINSET_SIZE / BATCH_SIZE),
-        validation_data=create_dataset_iterator(glob.glob('data/validation-*')),
-        validation_steps=int(TRAINSET_SIZE / BATCH_SIZE),
+        epochs=30,
+        steps_per_epoch=int(TRAINSET_SIZE / BATCH_SIZE),
+        verbose=1,
         callbacks=[
             tf.keras.callbacks.TensorBoard(
                 log_dir='{}/{}'.format(LOG_DIR, time.time()),
