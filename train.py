@@ -20,16 +20,20 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 """
 
 import glob
+import numpy as np
 import tensorflow as tf
 import time
 from tensorflow.python import keras as keras
 
+
 LOG_DIR = 'logs'
-SHUFFLE_BUFFER = 256
+SHUFFLE_BUFFER = 10
 BATCH_SIZE = 64
 NUM_CLASSES = 50
-RESIZE_TO = 128
+PARALLEL_CALLS=4
+RESIZE_TO = 224
 TRAINSET_SIZE = 7666
+VALSET_SIZE=851
 
 
 def parse_proto_example(proto):
@@ -44,21 +48,50 @@ def parse_proto_example(proto):
     return example['image'], example['image/class/label']
 
 
-def create_dataset_iterator(files):
-    return tf.data.TFRecordDataset(files)\
-        .map(parse_proto_example, num_parallel_calls=2)\
-        .shuffle(SHUFFLE_BUFFER)\
+def flip(image, label):
+    return tf.image.random_flip_up_down(tf.image.random_flip_left_right(image)), label
+
+
+def resize(image, label):
+    return tf.image.resize_images(image, tf.constant([RESIZE_TO, RESIZE_TO])), label
+
+
+def create_dataset_iterator(filenames):
+    files = tf.data.Dataset.list_files(filenames)
+    return files.apply(tf.contrib.data.parallel_interleave(tf.data.TFRecordDataset, cycle_length=PARALLEL_CALLS))\
+        .map(parse_proto_example, num_parallel_calls=PARALLEL_CALLS)\
+        .map(resize, num_parallel_calls=PARALLEL_CALLS)\
+        .cache()\
+        .map(flip, num_parallel_calls=PARALLEL_CALLS)\
         .batch(BATCH_SIZE)\
-        .repeat()\
+        .apply(tf.data.experimental.shuffle_and_repeat(SHUFFLE_BUFFER))\
+        .prefetch(2 * BATCH_SIZE)\
         .make_one_shot_iterator()
 
 
 def build_model():
-    return tf.keras.models.Sequential ([
+    return tf.keras.models.Sequential([
+        tf.keras.layers.Conv2D(filters=64, kernel_size=3),
+        tf.keras.layers.Conv2D(filters=64, kernel_size=3),
+        tf.keras.layers.MaxPool2D(),
+        tf.keras.layers.Conv2D(filters=128, kernel_size=3),
         tf.keras.layers.Conv2D(filters=128, kernel_size=3),
         tf.keras.layers.MaxPool2D(),
         tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.Conv2D(filters=256, kernel_size=3),
+        tf.keras.layers.Conv2D(filters=256, kernel_size=3),
+        tf.keras.layers.Conv2D(filters=256, kernel_size=3),
+        tf.keras.layers.Conv2D(filters=256, kernel_size=3),
+        tf.keras.layers.MaxPool2D(),
+        tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.Conv2D(filters=512, kernel_size=3),
+        tf.keras.layers.Conv2D(filters=512, kernel_size=3),
+        tf.keras.layers.Conv2D(filters=512, kernel_size=3),
+        tf.keras.layers.Conv2D(filters=512, kernel_size=3),
+        tf.keras.layers.MaxPool2D(),
         tf.keras.layers.Flatten(),
+        tf.keras.layers.Dense(1024, activation=tf.keras.activations.relu),
+        tf.keras.layers.Dense(1024, activation=tf.keras.activations.relu),
         tf.keras.layers.Dense(NUM_CLASSES, activation=tf.keras.activations.softmax)
     ])
 
@@ -69,7 +102,7 @@ def main():
     model = build_model()
 
     model.compile(
-        optimizer=keras.optimizers.sgd(lr=0.001),
+        optimizer=keras.optimizers.sgd(lr=0.005, momentum=0.5),
         loss=tf.keras.losses.categorical_crossentropy,
         metrics=[tf.keras.metrics.categorical_accuracy],
         target_tensors=[train_labels]
@@ -77,12 +110,12 @@ def main():
 
     model.fit(
         train_images, train_labels,
-        epochs=30, steps_per_epoch=int(TRAINSET_SIZE / BATCH_SIZE),
+        epochs=100, steps_per_epoch=int(np.ceil(TRAINSET_SIZE / float(BATCH_SIZE))),
         validation_data=create_dataset_iterator(glob.glob('data/validation-*')),
-        validation_steps=int(TRAINSET_SIZE / BATCH_SIZE),
+        validation_steps=int(np.ceil(VALSET_SIZE / float(BATCH_SIZE))),
         callbacks=[
             tf.keras.callbacks.TensorBoard(
-                log_dir='{}/{}'.format(LOG_DIR, time.time()),
+                log_dir='{}/{}-lr0.005-m0.5-hor-ver-flip'.format(LOG_DIR, time.time()),
                 write_images=True
             )
         ]
