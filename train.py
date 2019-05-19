@@ -24,7 +24,7 @@ import numpy as np
 import tensorflow as tf
 import time
 from tensorflow.python import keras as keras
-
+from tensorflow.python.keras.callbacks import LearningRateScheduler
 
 LOG_DIR = 'logs'
 SHUFFLE_BUFFER = 10
@@ -56,6 +56,14 @@ def resize(image, label):
     return tf.image.resize_images(image, tf.constant([RESIZE_TO, RESIZE_TO])), label
 
 
+def color(image, label):
+    image = tf.image.random_hue(image, 0.08)
+    image = tf.image.random_saturation(image, 0.6, 1.6)
+    image = tf.image.random_brightness(image, 0.05)
+    image = tf.image.random_contrast(image, 0.7, 1.3)
+    return tf.clip_by_value(image, 0, 1), label
+
+
 def create_dataset_iterator(filenames):
     files = tf.data.Dataset.list_files(filenames)
     return files.apply(tf.contrib.data.parallel_interleave(tf.data.TFRecordDataset, cycle_length=PARALLEL_CALLS))\
@@ -63,6 +71,7 @@ def create_dataset_iterator(filenames):
         .map(resize, num_parallel_calls=PARALLEL_CALLS)\
         .cache()\
         .map(flip, num_parallel_calls=PARALLEL_CALLS)\
+        .map(color, num_parallel_calls=PARALLEL_CALLS)\
         .batch(BATCH_SIZE)\
         .apply(tf.data.experimental.shuffle_and_repeat(SHUFFLE_BUFFER))\
         .prefetch(2 * BATCH_SIZE)\
@@ -96,26 +105,35 @@ def build_model():
     ])
 
 
+def learning_rate(epoch):
+    if epoch < 150:
+        return 0.005
+    return 0.0001
+
+
 def main():
     train_images, train_labels = create_dataset_iterator(glob.glob('data/train-*')).get_next()
     train_labels = tf.one_hot(train_labels, NUM_CLASSES)
     model = build_model()
 
     model.compile(
-        optimizer=keras.optimizers.sgd(lr=0.005, momentum=0.5),
+        optimizer=keras.optimizers.sgd(lr=0, momentum=0.5),
         loss=tf.keras.losses.categorical_crossentropy,
         metrics=[tf.keras.metrics.categorical_accuracy],
         target_tensors=[train_labels]
     )
 
+    lr = LearningRateScheduler(learning_rate)
+
     model.fit(
         train_images, train_labels,
-        epochs=100, steps_per_epoch=int(np.ceil(TRAINSET_SIZE / float(BATCH_SIZE))),
+        epochs=200, steps_per_epoch=int(np.ceil(TRAINSET_SIZE / float(BATCH_SIZE))),
         validation_data=create_dataset_iterator(glob.glob('data/validation-*')),
         validation_steps=int(np.ceil(VALSET_SIZE / float(BATCH_SIZE))),
         callbacks=[
+            lr,
             tf.keras.callbacks.TensorBoard(
-                log_dir='{}/{}-lr0.005-m0.5-hor-ver-flip'.format(LOG_DIR, time.time()),
+                log_dir='{}/{}'.format(LOG_DIR, time.time()),
                 write_images=True
             )
         ]
