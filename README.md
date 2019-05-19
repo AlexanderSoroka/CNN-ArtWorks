@@ -8,7 +8,7 @@ Pre-requisites:
 Steps to reproduce results:
 1. Clone this repository: 
     `git clone git@github.com:AlexanderSoroka/CNN-ArtWorks.git`
-2. Download [Kaggle art works dataset](https://www.kaggle.com/ikarus777/best-artworks-of-all-time)
+2. Download [Kaggle art works dataset](https://www.kaggle.com/ikarus777/best-artworks-of-all-time) and unpack it
 3. Generate TFRecords with build_image_data.py script:
     `python build_image_data.py --data_directory=data/images --output_directory=data`
     
